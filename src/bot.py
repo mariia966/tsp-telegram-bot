@@ -1,3 +1,4 @@
+from flask import Flask
 import asyncio
 import time
 import sys
@@ -489,7 +490,7 @@ async def handle_message(message: Message):
 # ==================== ЗАПУСК ====================
 
 async def main():
-    # Умное создание сессии: с прокси или без, в зависимости от окружения
+    # Умное создание сессии: с прокси или без
     use_proxy = os.getenv("USE_PROXY", "false").lower() == "true"
     
     if use_proxy:
@@ -522,5 +523,23 @@ async def main():
     await dp.start_polling(bot)
 
 
+# --- Новый код для веб-сервера ---
+def run_web():
+    """Запускает минимальный веб-сервер для health checks"""
+    web_app = Flask(__name__)
+    
+    @web_app.route('/')
+    @web_app.route('/health')
+    def health_check():
+        return "OK", 200
+    
+    port = int(os.environ.get("PORT", 8080))
+    web_app.run(host="0.0.0.0", port=port)
+
 if __name__ == "__main__":
+    import threading
+    # Запускаем веб-сервер в фоновом потоке
+    web_thread = threading.Thread(target=run_web, daemon=True)
+    web_thread.start()
+    # Запускаем бота
     asyncio.run(main())
