@@ -1,0 +1,7 @@
+aiogram==3.10.0
+python-dotenv==1.0.0
+requests==2.31.0
+sqlalchemy==2.0.25
+folium==0.15.0
+selenium==4.44.0
+webdriver-manager==4.0.1
