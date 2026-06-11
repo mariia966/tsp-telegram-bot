@@ -11,7 +11,7 @@ from aiogram.client.session.aiohttp import AiohttpSession
 import config
 from tsp_solver import TSPSolverAuto, geocode_address
 from database import get_session, get_or_create_user, save_route, get_user_routes, get_user_stats
-from visualizer import create_route_html
+from visualizer import create_route_png, create_route_html
 
 # Фикс для Windows
 if sys.platform == 'win32':
@@ -85,16 +85,16 @@ def format_route_response(addresses, path, total_distance, algorithm, computatio
 
 
 async def send_route_map(message: Message, coordinates, addresses, path):
-    """Генерирует и отправляет HTML-карту маршрута"""
+    """Генерирует и отправляет PNG-карту маршрута (работает на телефоне)"""
     
     try:
-        html_path = create_route_html(coordinates, addresses, path)
+        # Пытаемся отправить PNG (отображается прямо в чате)
+        png_path = create_route_png(coordinates, addresses, path)
         
-        with open(html_path, 'rb') as f:
-            await message.answer_document(
-                BufferedInputFile(f.read(), filename='route_map.html'),
+        with open(png_path, 'rb') as f:
+            await message.answer_photo(
+                BufferedInputFile(f.read(), filename='route_map.png'),
                 caption="🗺️ *Карта маршрута*\n\n"
-                       "📥 Скачайте файл и откройте в браузере\n\n"
                        "🟢 Зелёный — старт\n"
                        "🔵 Синий — промежуточная точка\n"
                        "🔴 Красный — финиш\n"
@@ -102,14 +102,25 @@ async def send_route_map(message: Message, coordinates, addresses, path):
                 parse_mode="Markdown"
             )
         
-        os.unlink(html_path)
+        os.unlink(png_path)
         
     except Exception as e:
-        print(f"❌ Ошибка отправки карты: {e}")
+        print(f"❌ Ошибка отправки PNG: {e}")
+        # Если PNG не получился, отправляем HTML как запасной вариант
+        try:
+            html_path = create_route_html(coordinates, addresses, path)
+            with open(html_path, 'rb') as f:
+                await message.answer_document(
+                    BufferedInputFile(f.read(), filename='route_map.html'),
+                    caption="🗺️ *Карта маршрута*\n\n📥 Скачайте файл и откройте в браузере",
+                    parse_mode="Markdown"
+                )
+            os.unlink(html_path)
+        except Exception as e2:
+            print(f"❌ Ошибка отправки HTML: {e2}")
 
 
 async def show_main_menu(message: Message):
-    """Показывает главное меню с кнопками"""
     await message.answer(
         "🏠 *Главное меню*\n\n"
         "Выберите действие на клавиатуре ниже или просто отправьте список городов:\n\n"
