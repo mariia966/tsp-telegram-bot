@@ -489,7 +489,16 @@ async def handle_message(message: Message):
 # ==================== ЗАПУСК ====================
 
 async def main():
-    session = AiohttpSession(proxy="socks5://127.0.0.1:10808")
+    # Умное создание сессии: с прокси или без, в зависимости от окружения
+    use_proxy = os.getenv("USE_PROXY", "false").lower() == "true"
+    
+    if use_proxy:
+        print("🔐 Использую прокси для подключения")
+        session = AiohttpSession(proxy="socks5://127.0.0.1:10808")
+    else:
+        print("🌐 Использую прямое подключение (без прокси)")
+        session = AiohttpSession()
+    
     bot = Bot(token=config.BOT_TOKEN, session=session)
     
     print("=" * 50)
@@ -497,6 +506,7 @@ async def main():
     print("=" * 50)
     print(f"📱 Бот: @{(await bot.get_me()).username}")
     print(f"🔑 Токен: {config.BOT_TOKEN[:15]}...")
+    print(f"🔗 Режим: {'Прокси SOCKS5' if use_proxy else 'Прямое подключение'}")
     print("=" * 50)
     print("✅ Готов к работе!")
     print("=" * 50)
