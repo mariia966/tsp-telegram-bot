@@ -1,124 +1,129 @@
 """
 Модуль визуализации маршрутов
-Генерирует интерактивные HTML-карты с помощью Folium
+Генерирует PNG-изображение карты для отправки в Telegram
 """
 
-import folium
 import os
 import tempfile
 from datetime import datetime
+from playwright.sync_api import sync_playwright
 
 
+def create_route_png(coordinates, points_names, path, filename=None):
+    """
+    Создаёт PNG-изображение карты маршрута
+    """
+    
+    if filename is None:
+        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+        filename = f"route_map_{timestamp}.png"
+    
+    # Генерируем HTML
+    html_content = generate_html_map(coordinates, points_names, path)
+    
+    # Сохраняем HTML во временный файл
+    html_path = os.path.join(tempfile.gettempdir(), f"temp_map_{timestamp}.html")
+    with open(html_path, 'w', encoding='utf-8') as f:
+        f.write(html_content)
+    
+    # Конвертируем HTML в PNG через Playwright
+    png_path = os.path.join(tempfile.gettempdir(), filename)
+    
+    with sync_playwright() as p:
+        browser = p.chromium.launch(headless=True)
+        page = browser.new_page(viewport={'width': 1200, 'height': 800})
+        page.goto(f'file://{html_path}')
+        page.wait_for_timeout(2000)  # Ждём загрузки карты
+        page.screenshot(path=png_path, full_page=True)
+        browser.close()
+    
+    # Удаляем временный HTML
+    os.unlink(html_path)
+    
+    return png_path
+
+
+def generate_html_map(coordinates, points_names, path):
+    """
+    Генерирует HTML-код карты (без сохранения в файл)
+    """
+    
+    ordered_coords = [coordinates[idx] for idx in path]
+    ordered_names = [points_names[idx] for idx in path]
+    
+    center_lat = sum(c[0] for c in coordinates) / len(coordinates)
+    center_lon = sum(c[1] for c in coordinates) / len(coordinates)
+    
+    # Формируем список точек для JavaScript
+    points_js = []
+    for i, (coord, name) in enumerate(zip(ordered_coords, ordered_names)):
+        number = i + 1
+        if i == 0:
+            color = 'green'
+            icon = '🚩'
+        elif i == len(ordered_coords) - 1:
+            color = 'red'
+            icon = '🏁'
+        else:
+            color = 'blue'
+            icon = '📍'
+        
+        points_js.append(f"""
+            L.marker([{coord[0]}, {coord[1]}], {{
+                icon: L.divIcon({{
+                    html: '<div style="background-color: {color}; width: 24px; height: 24px; border-radius: 50%; display: flex; align-items: center; justify-content: center; color: white; font-weight: bold; border: 2px solid white;">{number}</div>',
+                    className: 'custom-div-icon',
+                    iconSize: [24, 24]
+                }})
+            }}).bindPopup('<b>{number}. {name}</b><br>{icon} {name}<br>Координаты: {coord[0]:.4f}, {coord[1]:.4f}').addTo(map);
+        """)
+    
+    # Координаты для линии маршрута
+    line_coords = "], [".join([f"[{coord[0]}, {coord[1]}]" for coord in ordered_coords])
+    
+    html = f"""<!DOCTYPE html>
+<html>
+<head>
+    <title>Маршрут</title>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=yes">
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <style>
+        body {{ margin: 0; padding: 0; }}
+        #map {{ width: 100%; height: 800px; }}
+        .custom-div-icon {{ background: transparent; border: none; }}
+    </style>
+</head>
+<body>
+    <div id="map"></div>
+    <script>
+        var map = L.map('map').setView([{center_lat}, {center_lon}], 5);
+        L.tileLayer('https://{{s}}.basemaps.cartocdn.com/light_all/{{z}}/{{x}}/{{y}}.png', {{
+            attribution: '&copy; <a href="https://www.openstreetmap.org/copyright">OSM</a> &copy; CartoDB'
+        }}).addTo(map);
+        
+        {"".join(points_js)}
+        
+        L.polyline([[{line_coords}]], {{ color: '#3388ff', weight: 4, opacity: 0.8 }}).addTo(map);
+    </script>
+</body>
+</html>"""
+    
+    return html
+
+
+# Старая функция (оставляем для совместимости)
 def create_route_html(coordinates, points_names, path, filename=None):
-    """
-    Создаёт HTML-карту маршрута
+    """Генерирует HTML-карту (без конвертации в PNG)"""
+    html_content = generate_html_map(coordinates, points_names, path)
     
-    Аргументы:
-    - coordinates: список кортежей [(lat, lon), ...]
-    - points_names: список названий точек
-    - path: порядок обхода (список индексов)
-    - filename: имя файла (если None, создаётся автоматически)
-    
-    Возвращает:
-    - путь к созданному HTML-файлу
-    """
-    
-    # Если имя файла не указано, создаём с timestamp
     if filename is None:
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         filename = f"route_map_{timestamp}.html"
     
-    # Получаем координаты точек в правильном порядке
-    ordered_coords = [coordinates[idx] for idx in path]
-    ordered_names = [points_names[idx] for idx in path]
-    
-    # Вычисляем центр карты
-    center_lat = sum(c[0] for c in coordinates) / len(coordinates)
-    center_lon = sum(c[1] for c in coordinates) / len(coordinates)
-    
-    # Создаём карту
-    route_map = folium.Map(
-        location=[center_lat, center_lon],
-        zoom_start=6,
-        tiles='OpenStreetMap'
-    )
-    
-    # Добавляем маркеры для каждой точки
-    for i, (coord, name) in enumerate(zip(ordered_coords, ordered_names)):
-        number = i + 1
-        
-        # Определяем цвет маркера
-        if i == 0:
-            icon_color = 'green'
-        elif i == len(ordered_coords) - 1:
-            icon_color = 'red'
-        else:
-            icon_color = 'blue'
-        
-        # Текст всплывающей подсказки
-        popup_text = f"""
-        <b>{number}. {name}</b><br>
-        <i>Координаты:</i> {coord[0]:.4f}, {coord[1]:.4f}
-        """
-        
-        # Добавляем маркер
-        folium.Marker(
-            location=[coord[0], coord[1]],
-            popup=folium.Popup(popup_text, max_width=300),
-            tooltip=f"{number}. {name}",
-            icon=folium.Icon(color=icon_color, icon='info-sign', prefix='glyphicon')
-        ).add_to(route_map)
-        
-        # Добавляем кружок с номером
-        folium.map.Marker(
-            [coord[0], coord[1]],
-            icon=folium.DivIcon(
-                html=f'<div style="font-size: 14px; font-weight: bold; color: white; background-color: {icon_color}; border-radius: 50%; width: 24px; height: 24px; display: flex; align-items: center; justify-content: center; border: 2px solid white;">{number}</div>'
-            )
-        ).add_to(route_map)
-    
-    # Добавляем линию маршрута
-    folium.PolyLine(
-        locations=ordered_coords,
-        color='blue',
-        weight=4,
-        opacity=0.8,
-        popup='Маршрут'
-    ).add_to(route_map)
-    
-    # Добавляем стрелки направления
-    for i in range(len(ordered_coords) - 1):
-        mid_lat = (ordered_coords[i][0] + ordered_coords[i+1][0]) / 2
-        mid_lon = (ordered_coords[i][1] + ordered_coords[i+1][1]) / 2
-        folium.RegularPolygonMarker(
-            location=[mid_lat, mid_lon],
-            color='blue',
-            fill=True,
-            fill_color='blue',
-            number_of_sides=3,
-            radius=6,
-            rotation=0
-        ).add_to(route_map)
-    
-    # Добавляем легенду
-    legend_html = '''
-    <div style="position: fixed; bottom: 30px; left: 30px; z-index: 1000; background-color: white; padding: 10px; border-radius: 8px; border: 2px solid grey; font-size: 12px; font-family: Arial, sans-serif;">
-        <b>📖 Легенда:</b><br>
-        🟢 <span style="color: green;">Старт</span><br>
-        🔵 <span style="color: blue;">Промежуточная точка</span><br>
-        🔴 <span style="color: red;">Финиш</span><br>
-        🔵 <span style="color: blue;">—— Линия маршрута</span>
-    </div>
-    '''
-    route_map.get_root().html.add_child(folium.Element(legend_html))
-    
-    # Сохраняем карту
     filepath = os.path.join(tempfile.gettempdir(), filename)
-    route_map.save(filepath)
+    with open(filepath, 'w', encoding='utf-8') as f:
+        f.write(html_content)
     
-    print(f"🗺️ Карта сохранена: {filepath}")
     return filepath
-
-
-# Упрощённый алиас
-create_route_map = create_route_html
